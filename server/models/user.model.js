@@ -1,13 +1,14 @@
 import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 
-// Define the schema for User
+// Define the schema for the User model
 const userSchema = new Schema(
   {
     firstName: {
       type: String,
       required: true,
-      trim: true,
+      trim: true, // Removes unwanted whitespace
     },
     lastName: {
       type: String,
@@ -18,7 +19,7 @@ const userSchema = new Schema(
       type: String,
       required: true,
       unique: true,
-      lowercase: true,
+      lowercase: true, // Ensures consistency
       trim: true,
     },
     email: {
@@ -27,12 +28,13 @@ const userSchema = new Schema(
       unique: true,
       lowercase: true,
       trim: true,
+      // Optional: Add regex validator to validate email format
     },
     password: {
       type: String,
       required: true,
       minlength: 8,
-      select: false, // Prevent password from being returned in queries
+      select: false, // Prevents password from being returned in queries
     },
     dateOfBirth: {
       type: Date,
@@ -44,32 +46,72 @@ const userSchema = new Schema(
     },
     isActive: {
       type: Boolean,
-      default: true,
+      default: true, // Can be used for soft deletes or deactivation
+    },
+    refreshToken: {
+      type: String,
+      select: false, // Prevents refresh token from leaking via accidental queries
     },
   },
   {
-    timestamps: true, // Adds createdAt and updatedAt automatically
+    timestamps: true, // Automatically adds createdAt and updatedAt fields
   }
 );
 
-// Pre-save hook to hash password before saving to database
+// 🔐 Middleware: Hash password before saving user to database
 userSchema.pre("save", async function (next) {
-  // Only hash password if it has been modified (or is new)
-  if (!this.isModified("password")) return next();
+  if (!this.isModified("password")) return next(); // Skip if not modified
 
   try {
-    const salt = await bcrypt.genSalt(10); // Generate salt
-    this.password = await bcrypt.hash(this.password, salt); // Hash the password
-    next(); // Continue saving
+    const salt = await bcrypt.genSalt(10); // Recommended rounds
+    this.password = await bcrypt.hash(this.password, salt); // Store hashed password
+    next();
   } catch (error) {
-    next(error); // Pass error to error handler
+    next(error); // Forward any errors
   }
 });
 
-// Custom method to compare entered password with hashed password in DB
+// ✅ Instance Method: Compare entered password with hashed password
 userSchema.methods.comparePassword = async function (enteredPassword) {
+  if (!this.password) return false; // Safety check
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Export the User model
+// 🔑 Instance Method: Generate JWT Access Token
+userSchema.methods.generateAccessToken = function () {
+  return jwt.sign(
+    {
+      _id: this._id,
+      email: this.email,
+      username: this.username,
+    },
+    process.env.ACCESS_TOKEN_SECRET,
+    {
+      expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "15m",
+    }
+  );
+};
+
+// 🔁 Instance Method: Generate JWT Refresh Token
+userSchema.methods.generateRefreshToken = function () {
+  return jwt.sign(
+    {
+      _id: this._id,
+    },
+    process.env.REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "7d",
+    }
+  );
+};
+
+// 🛡️ Security: Hide sensitive fields from JSON responses (e.g., APIs)
+userSchema.methods.toJSON = function () {
+  const userObject = this.toObject();
+  delete userObject.password;
+  delete userObject.refreshToken;
+  return userObject;
+};
+
+// Export the compiled model
 export const User = mongoose.model("User", userSchema);
