@@ -5,29 +5,34 @@ import { BODY_LIMIT } from "./config/constants.js"; // centralized config for li
 
 const app = express();
 
-// Enable Cross-Origin Resource Sharing (CORS) to allow frontend communication
+// Enable CORS for frontend communication
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN, // frontend origin, e.g. http://localhost:3000
-    credentials: true, // allows cookies to be sent with requests
+    origin: process.env.CORS_ORIGIN || "http://localhost:3000", // fallback
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // explicitly defined
   })
 );
 
-// Parse incoming JSON requests (with body size limit)
+// Parse incoming JSON with size limit
 app.use(express.json({ limit: BODY_LIMIT }));
 
-// Parse form-data (x-www-form-urlencoded)
+// Parse form-data (URL-encoded)
 app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
 
-// Serve static files (e.g. images, HTML) from 'public' directory
+// Serve static files from /public
 app.use(express.static("public"));
 
-// Parse cookies in incoming requests
+// Parse cookies
 app.use(cookieParser());
 
-// Mount user-related API routes under versioned path
+//  Import & Mount Routes
 import userRouter from "./routes/user.routes.js";
 app.use("/api/v1/users", userRouter);
 
-// Export the configured app instance to be used in index.js
+// 404 Handler (Optional)
+app.use("*", (req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
+});
+
 export default app;
