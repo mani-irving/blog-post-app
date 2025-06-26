@@ -6,19 +6,21 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.js";
 
-const generateAccessTokenAndRefreshToken = async(userId) =>{
+const generateAccessTokenAndRefreshToken = async (userId) => {
   try {
-    const user = await User.findById(userId).select("-password -refreshToken -isActive -profilePicture");
+    const user = await User.findById(userId).select(
+      "-password -refreshToken -isActive -profilePicture"
+    );
     const accessToken = await user.generateAccessToken();
     const refreshToken = await user.generateRefreshToken();
     user.refreshToken = refreshToken;
-    await user.save({validateBeforeSave: false});
+    await user.save({ validateBeforeSave: false });
 
-    return {accessToken, refreshToken};
+    return { accessToken, refreshToken };
   } catch (error) {
     throw new ApiError(500, "Something went wrong while generating the tokens");
   }
-}
+};
 
 const registerUser = asyncHandler(async (req, res) => {
   const { firstName, lastName, username, email, password, dateOfBirth } =
@@ -77,34 +79,92 @@ const registerUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "User registered Successfully", createdUser));
 });
 
-export { registerUser };
-
-const loginUser = asyncHandler(async(req, res) =>{
-  const {username, email, password} = req.body;
-  if(!username && !email){
-    throw new ApiError(400, "Either of username or email is required for login");
+const loginUser = asyncHandler(async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username && !email) {
+    throw new ApiError(
+      400,
+      "Either of username or email is required for login"
+    );
   }
-  if(!(password.trim())
-  {
-    throw new ApiError(400, "Password must be present");
+  if (!password) {
+    throw new ApiError(400, "Password is required");
   }
 
   const user = await User.findOne({
-    $or: [{username}, {email}],
-  });
+    $or: [{ username }, { email }],
+  }).select("+password");
 
-  if(!user){
+  if (!user) {
     throw new ApiError(400, "User not registered or Invalid User");
   }
 
   const passwordValid = await user.comparePassword(password);
 
-  if(!passwordValid){
+  if (!passwordValid) {
     throw new ApiError(400, "Passowrd didn't matched");
   }
 
-  const {accessToken, refreshToken} = generateAccessTokenAndRefreshToken();
+  const { accessToken, refreshToken } =
+    await generateAccessTokenAndRefreshToken(user._id);
 
-  return res.status(200).cook
+  user.isActive = true;
+  await user.save({ validateBeforeSave: false });
 
+  const loggedInUser = await User.findById(user._id).select(
+    "-password -refreshToken"
+  );
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
+
+  return res
+    .status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken, options)
+    .json(
+      new ApiResponse(200, "User logged In Successfully", {
+        user: loggedInUser,
+        accessToken,
+        refreshToken,
+      })
+    );
 });
+
+const logOutUser = asyncHandler(async (req, res) => {
+  let _id;
+
+  try {
+    _id = req.user?._id;
+  } catch (error) {
+    throw new ApiError(400, "User Id doesn't exist");
+  }
+
+  await User.findByIdAndUpdate(
+    _id,
+    {
+      $unset: { refreshToken: 1 },
+      $set: { isActive: false },
+    },
+    { new: true }
+  );
+
+  const user = await User.findById(_id).select("+isActive");
+  const firstName = user.firstName;
+
+  const options = {
+    httpOnly: true,
+    secure: true,
+  };
+
+  return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json(
+      new ApiResponse(200, `${firstName} logged Out Successfully`, { user })
+    );
+});
+
+export { registerUser, loginUser, logOutUser };
