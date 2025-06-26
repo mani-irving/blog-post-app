@@ -1,200 +1,110 @@
-// server/controllers/user.controller.js
-import { User } from "../models/user.model.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import uploadOnCloudinary from "../utils/cloudinaryUploader.js";
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import { User } from "../models/user.model.js";
 
-// Utility: Send token in cookie
-const sendTokenInCookie = (res, user, statusCode = 200) => {
-  const accessToken = user.generateAccessToken();
-  const refreshToken = user.generateRefreshToken();
+const generateAccessTokenAndRefreshToken = async(userId) =>{
+  try {
+    const user = await User.findById(userId).select("-password -refreshToken -isActive -profilePicture");
+    const accessToken = await user.generateAccessToken();
+    const refreshToken = await user.generateRefreshToken();
+    user.refreshToken = refreshToken;
+    await user.save({validateBeforeSave: false});
 
-  // Save refreshToken in DB
-  user.refreshToken = refreshToken;
-  user.save({ validateBeforeSave: false });
+    return {accessToken, refreshToken};
+  } catch (error) {
+    throw new ApiError(500, "Something went wrong while generating the tokens");
+  }
+}
 
-  // Set cookies
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "Strict",
-  };
-
-  res
-    .status(statusCode)
-    .cookie("accessToken", accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000, // 15 minutes
-    })
-    .cookie("refreshToken", refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    })
-    .json(
-      new ApiResponse(statusCode, "Logged in successfully", {
-        user,
-        accessToken,
-      })
-    );
-};
-
-// 🟢 REGISTER
-export const registerUser = asyncHandler(async (req, res) => {
+const registerUser = asyncHandler(async (req, res) => {
   const { firstName, lastName, username, email, password, dateOfBirth } =
     req.body;
 
   if (
-    !firstName ||
-    !lastName ||
-    !username ||
-    !email ||
-    !password ||
-    !dateOfBirth
+    [firstName, lastName, username, email, password, dateOfBirth].some(
+      (field) => field?.trim() === ""
+    )
   ) {
     throw new ApiError(400, "All fields are required");
   }
 
-  const existingUser = await User.findOne({ $or: [{ email }, { username }] });
-  if (existingUser) throw new ApiError(409, "User already exists");
+  const existedUser = await User.findOne({
+    $or: [{ username }, { email }],
+  });
 
-  const newUser = await User.create({
+  if (existedUser) {
+    throw new ApiError(400, "User already exists");
+  }
+
+  const profilePictureImagePath = req.files?.profilePicture[0]?.path;
+
+  if (!profilePictureImagePath) {
+    throw new ApiError(400, "Profile Image is required");
+  }
+
+  const profilePictureImageObjectFromClodinary = await uploadOnCloudinary(
+    profilePictureImagePath
+  );
+
+  if (!profilePictureImageObjectFromClodinary) {
+    throw new ApiError(500, "Error while uploading the Image on clodinary");
+  }
+
+  const user = await User.create({
     firstName,
     lastName,
     username,
     email,
     password,
     dateOfBirth,
+    profilePicture: profilePictureImageObjectFromClodinary.url,
   });
 
-  sendTokenInCookie(res, newUser, 201);
-});
-
-// 🔐 LOGIN
-export const loginUser = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) throw new ApiError(400, "All fields are required");
-
-  const user = await User.findOne({ email }).select("+password +refreshToken");
-  if (!user || !(await user.comparePassword(password))) {
-    throw new ApiError(401, "Invalid email or password");
-  }
-
-  sendTokenInCookie(res, user, 200);
-});
-
-// 🚪 LOGOUT
-export const logoutUser = asyncHandler(async (req, res) => {
-  res
-    .clearCookie("accessToken")
-    .clearCookie("refreshToken")
-    .status(200)
-    .json(new ApiResponse(200, "Logged out successfully"));
-});
-
-// 🔁 REFRESH ACCESS TOKEN
-export const refreshAccessToken = asyncHandler(async (req, res) => {
-  const incomingRefreshToken = req.cookies?.refreshToken;
-  if (!incomingRefreshToken) throw new ApiError(401, "Refresh Token missing");
-
-  const decoded = jwt.verify(
-    incomingRefreshToken,
-    process.env.REFRESH_TOKEN_SECRET
+  const createdUser = await User.findById(user._id).select(
+    "-password -refreshToken -isActive"
   );
 
-  const user = await User.findById(decoded._id).select("+refreshToken");
-  if (!user || user.refreshToken !== incomingRefreshToken) {
-    throw new ApiError(401, "Invalid refresh token");
+  if (!createdUser) {
+    throw new ApiError(500, "Something went wrong while registering the user");
   }
 
-  const newAccessToken = user.generateAccessToken();
-
-  res
+  return res
     .status(200)
-    .cookie("accessToken", newAccessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 15 * 60 * 1000,
-    })
-    .json(
-      new ApiResponse(200, "Access token refreshed", {
-        accessToken: newAccessToken,
-      })
-    );
+    .json(new ApiResponse(200, "User registered Successfully", createdUser));
 });
 
-// server/controllers/user.controller.js (continued)
+export { registerUser };
 
-// 👤 GET CURRENT USER
-export const getCurrentUser = asyncHandler(async (req, res) => {
-  const user = req.user; // This is set in auth.middleware.js
-  res.status(200).json(new ApiResponse(200, "User fetched successfully", user));
-});
+const loginUser = asyncHandler(async(req, res) =>{
+  const {username, email, password} = req.body;
+  if(!username && !email){
+    throw new ApiError(400, "Either of username or email is required for login");
+  }
+  if(!(password.trim())
+  {
+    throw new ApiError(400, "Password must be present");
+  }
 
-// 🛠️ UPDATE PROFILE
-export const updateProfile = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-
-  const updateFields = {
-    firstName: req.body.firstName,
-    lastName: req.body.lastName,
-    username: req.body.username,
-    dateOfBirth: req.body.dateOfBirth,
-    profilePicture: req.body.profilePicture, // If you're uploading to cloudinary and passing URL
-  };
-
-  // Remove undefined fields
-  Object.keys(updateFields).forEach(
-    (key) => updateFields[key] === undefined && delete updateFields[key]
-  );
-
-  const updatedUser = await User.findByIdAndUpdate(userId, updateFields, {
-    new: true,
-    runValidators: true,
+  const user = await User.findOne({
+    $or: [{username}, {email}],
   });
 
-  res.status(200).json(new ApiResponse(200, "Profile updated", updatedUser));
-});
-
-// 🔑 CHANGE PASSWORD
-export const changePassword = asyncHandler(async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-  if (!oldPassword || !newPassword) {
-    throw new ApiError(400, "Old and new passwords are required");
+  if(!user){
+    throw new ApiError(400, "User not registered or Invalid User");
   }
 
-  const user = await User.findById(req.user._id).select("+password");
-  if (!user) throw new ApiError(404, "User not found");
+  const passwordValid = await user.comparePassword(password);
 
-  const isOldCorrect = await user.comparePassword(oldPassword);
-  if (!isOldCorrect) throw new ApiError(401, "Old password is incorrect");
+  if(!passwordValid){
+    throw new ApiError(400, "Passowrd didn't matched");
+  }
 
-  user.password = newPassword;
-  await user.save();
+  const {accessToken, refreshToken} = generateAccessTokenAndRefreshToken();
 
-  res.status(200).json(new ApiResponse(200, "Password changed successfully"));
+  return res.status(200).cook
+
 });
-
-// ❌ DELETE USER
-export const deleteUser = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-
-  await User.findByIdAndDelete(userId);
-
-  res.clearCookie("accessToken").clearCookie("refreshToken");
-
-  res.status(200).json(new ApiResponse(200, "User deleted successfully"));
-});
-
-export {
-  registerUser,
-  loginUser,
-  logoutUser,
-  refreshAccessToken,
-  getCurrentUser,
-  updateProfile,
-  changePassword,
-  deleteUser,
-};

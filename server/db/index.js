@@ -12,11 +12,7 @@ const connectDB = async () => {
   try {
     // Attempt to connect to MongoDB using Mongoose
     const connectionInstance = await mongoose.connect(
-      `${process.env.MONGODB_URI}/${process.env.DB_NAME}`, // Construct full DB URI dynamically
-      {
-        useNewUrlParser: true, // Use modern URL string parser (avoids deprecation warnings)
-        useUnifiedTopology: true, // Use new topology engine for more robust connection handling
-      }
+      `${process.env.MONGODB_URI}` // Construct full DB URI dynamically
     );
 
     // Log successful connection details (useful for debugging and monitoring)

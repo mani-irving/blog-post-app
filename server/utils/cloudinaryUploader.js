@@ -8,7 +8,7 @@ import fs from "fs";
  * @param {string} localFilePath - File path in /public/temp before upload
  * @returns Cloudinary upload response or null
  */
-export const uploadOnCloudinary = async (localFilePath) => {
+const uploadOnCloudinary = async (localFilePath) => {
   try {
     if (!localFilePath) return null;
 
@@ -27,3 +27,4 @@ export const uploadOnCloudinary = async (localFilePath) => {
     return null;
   }
 };
+export default uploadOnCloudinary;
