@@ -44,6 +44,9 @@ const userSchema = new Schema(
       type: String,
       default: "https://example.com/default-profile-picture.png",
     },
+    cloudinaryPublicId: {
+      type: String,
+    },
     isActive: {
       type: Boolean,
       default: true, // Can be used for soft deletes or deactivation
