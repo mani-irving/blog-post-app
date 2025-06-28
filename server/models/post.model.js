@@ -15,7 +15,6 @@ const postSchema = new Schema(
     // URL-friendly version of the title
     slug: {
       type: String,
-      required: true,
       trim: true,
       unique: true, // Prevent duplicate slugs for SEO and routing
     },
@@ -27,16 +26,22 @@ const postSchema = new Schema(
       trim: true,
     },
 
-    // Optional image URL to represent the blog visually
+    // Optional image URL to represent the blog visually(URL from Cloudinary after Upload)
     featuredImage: {
       type: String,
     },
 
-    // List of tags for filtering/search (e.g., ["nodejs", "mongodb"])
-    tags: {
-      type: [String],
-      default: [],
+    //Optional image public_id fetched from image when uploaded through cloudinary
+    featuredImagePath: {
+      type: String,
     },
+
+    // List of tags for filtering/search (e.g., ["nodejs", "mongodb"])
+    //for further future
+    // tags: {
+    //   type: [String],
+    //   default: [],
+    // },
 
     // Reference to a Category document
     category: {
@@ -66,15 +71,17 @@ const postSchema = new Schema(
     ],
 
     // Flag to control whether post is publicly visible or not
-    isPublished: {
-      type: Boolean,
-      default: false,
-    },
+    //Feature to be placed in further future
+    // isPublished: {
+    //   type: Boolean,
+    //   default: false,
+    // },
 
     // Timestamp of when the post was published
-    publishedAt: {
-      type: Date,
-    },
+    //To be done through Time Stamps
+    // publishedAt: {
+    //   type: Date,
+    // },
   },
   {
     // Automatically add createdAt and updatedAt fields

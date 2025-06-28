@@ -1,12 +1,12 @@
 // Import dependencies and utility modules
+import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import uploadOnCloudinary from "../utils/cloudinaryUploader.js";
-import mongoose from "mongoose";
-import jwt from "jsonwebtoken";
-import { User } from "../models/user.model.js";
 import deleteOnCloudinary from "../utils/deleteOnCloudinary.js";
+import { User } from "../models/user.model.js";
 
 /**
  * Generates access and refresh tokens for a user.
@@ -481,6 +481,59 @@ const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * @desc    Delete the currently logged-in user's account
+ * @route   DELETE /api/users/delete
+ * @access  Protected
+ */
+const deleteUser = asyncHandler(async (req, res) => {
+  // Extract authenticated user ID from request
+  const userId = req.user?._id;
+
+  // Ensure the user is authenticated
+  if (!userId) {
+    throw new ApiError(400, "User isn't authenticated to delete the account");
+  }
+
+  // Fetch the user record from the database
+  const user = await User.findById(userId).select(
+    "-password -refreshToken -isActive"
+  );
+
+  // If user does not exist in DB
+  if (!user) {
+    throw new ApiError(400, "User not found");
+  }
+
+  // Cloudinary default fallback profile image
+  const defaultProfilePicture =
+    "https://example.com/default-profile-picture.png";
+
+  // Delete user's profile picture from Cloudinary if it's a custom one
+  if (
+    user.profilePicture !== defaultProfilePicture &&
+    user.cloudinaryPublicId
+  ) {
+    await deleteOnCloudinary(user.cloudinaryPublicId);
+  }
+
+  // Permanently delete the user from the database
+  await User.findByIdAndDelete(user._id);
+
+  // Options to clear secure cookies
+  const options = {
+    httpOnly: true, // Prevents access via JS
+    secure: true, // Ensures HTTPS-only transmission
+  };
+
+  // Clear authentication cookies and respond
+  return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json(new ApiResponse(200, "User deleted successfully"));
+});
+
 // Export all controller functions
 export {
   registerUser,
@@ -493,4 +546,5 @@ export {
   updateEmail,
   updateProfilePicture,
   getUserFollowersAndFollowings,
+  deleteUser,
 };

@@ -12,6 +12,7 @@ import {
   updateEmail,
   updateProfilePicture,
   getUserFollowersAndFollowings,
+  deleteUser,
 } from "../controllers/user.controller.js";
 import { upload } from "../middleware/upload.middleware.js";
 import authMiddleware from "../middleware/auth.middleware.js";
@@ -97,5 +98,12 @@ router
  * @access  Protected
  */
 router.route("/logout").post(authMiddleware, logOutUser);
+
+/**
+ * @desc    Delete the Current Logged-in User Account
+ * @route   POST /api/users/delete-user
+ * @access  Protected
+ */
+router.route("/delete-user").post(authMiddleware, deleteUser);
 
 export default router;
