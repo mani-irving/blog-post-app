@@ -1,3 +1,4 @@
+// Import dependencies and utility modules
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -7,6 +8,10 @@ import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.js";
 import deleteOnCloudinary from "../utils/deleteOnCloudinary.js";
 
+/**
+ * Generates access and refresh tokens for a user.
+ * Updates the user's refreshToken in DB.
+ */
 const generateAccessTokenAndRefreshToken = async (userId) => {
   try {
     const user = await User.findById(userId).select(
@@ -14,6 +19,7 @@ const generateAccessTokenAndRefreshToken = async (userId) => {
     );
     const accessToken = await user.generateAccessToken();
     const refreshToken = await user.generateRefreshToken();
+
     user.refreshToken = refreshToken;
     await user.save({ validateBeforeSave: false });
 
@@ -23,10 +29,16 @@ const generateAccessTokenAndRefreshToken = async (userId) => {
   }
 };
 
+/**
+ * @desc Register a new user
+ * @route POST /api/users/register
+ * @access Public
+ */
 const registerUser = asyncHandler(async (req, res) => {
   const { firstName, lastName, username, email, password, dateOfBirth } =
     req.body;
 
+  // Validate all required fields
   if (
     [firstName, lastName, username, email, password, dateOfBirth].some(
       (field) => field?.trim() === ""
@@ -35,6 +47,7 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "All fields are required");
   }
 
+  // Check for existing user by username or email
   const existedUser = await User.findOne({
     $or: [{ username }, { email }],
   });
@@ -43,26 +56,23 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User already exists");
   }
 
-  //It would be used when I would take multiple files from the request body and upload on temp location through multer.
-  //In that case in middleware i need to use: upload.fields([{ name: "profilePicture", maxCount: 1 }, {...}, {...}])
-  // const profilePictureImagePath = req.files?.profilePicture[0]?.path;
-
-  // We would use this line when we wanted to fetch a single file's path uploaded through multer on temporary location (here "../public/temp")
-  // Then before using this we would use the multer middleware in our /register route like: upload.single("file-Name-Same-As-Frontend-Input-Field-Attribute-Name")
+  // Get uploaded profile picture path
   const profilePictureImagePath = req.file?.path;
 
   if (!profilePictureImagePath) {
     throw new ApiError(400, "Profile Image is required");
   }
 
+  // Upload profile picture to Cloudinary
   const profilePictureImageObjectFromClodinary = await uploadOnCloudinary(
     profilePictureImagePath
   );
 
   if (!profilePictureImageObjectFromClodinary) {
-    throw new ApiError(500, "Error while uploading the Image on clodinary");
+    throw new ApiError(500, "Error while uploading the Image on Cloudinary");
   }
 
+  // Create user in DB
   const user = await User.create({
     firstName,
     lastName,
@@ -87,18 +97,26 @@ const registerUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "User registered Successfully", createdUser));
 });
 
+/**
+ * @desc Login user with username/email and password
+ * @route POST /api/users/login
+ * @access Public
+ */
 const loginUser = asyncHandler(async (req, res) => {
   const { username, email, password } = req.body;
+
   if (!username && !email) {
     throw new ApiError(
       400,
       "Either of username or email is required for login"
     );
   }
+
   if (!password) {
     throw new ApiError(400, "Password is required");
   }
 
+  // Find user by username/email
   const user = await User.findOne({
     $or: [{ username }, { email }],
   }).select("+password");
@@ -110,9 +128,10 @@ const loginUser = asyncHandler(async (req, res) => {
   const passwordValid = await user.comparePassword(password);
 
   if (!passwordValid) {
-    throw new ApiError(400, "Passowrd didn't matched");
+    throw new ApiError(400, "Password didn't match");
   }
 
+  // Generate tokens
   const { accessToken, refreshToken } =
     await generateAccessTokenAndRefreshToken(user._id);
 
@@ -122,6 +141,7 @@ const loginUser = asyncHandler(async (req, res) => {
   const loggedInUser = await User.findById(user._id).select(
     "-password -refreshToken"
   );
+
   const options = {
     httpOnly: true,
     secure: true,
@@ -140,6 +160,11 @@ const loginUser = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * @desc Logout user and clear cookies + update DB
+ * @route POST /api/users/logout
+ * @access Protected
+ */
 const logOutUser = asyncHandler(async (req, res) => {
   let _id;
 
@@ -159,7 +184,6 @@ const logOutUser = asyncHandler(async (req, res) => {
   );
 
   const user = await User.findById(_id).select("+isActive");
-  const firstName = user.firstName;
 
   const options = {
     httpOnly: true,
@@ -171,10 +195,17 @@ const logOutUser = asyncHandler(async (req, res) => {
     .clearCookie("accessToken", options)
     .clearCookie("refreshToken", options)
     .json(
-      new ApiResponse(200, `${firstName} logged Out Successfully`, { user })
+      new ApiResponse(200, `${user.firstName} logged Out Successfully`, {
+        user,
+      })
     );
 });
 
+/**
+ * @desc Generate new access token from valid refresh token
+ * @route GET /api/users/refresh-access-token
+ * @access Protected
+ */
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const incomingRefreshToken =
     req.cookies?.refreshToken || req.body.refreshToken;
@@ -182,7 +213,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   if (!incomingRefreshToken) {
     throw new ApiError(
       400,
-      "Unauthorised Request, we need refreshToken to generate ne accessToken"
+      "Unauthorised Request, we need refreshToken to generate new accessToken"
     );
   }
 
@@ -192,43 +223,41 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       process.env.REFRESH_TOKEN_SECRET
     );
 
-    if (!isValidRefreshToken) {
-      throw new ApiError(400, "Invalid Refresh Token or expired Refresh Token");
-    }
-
     const _id = isValidRefreshToken._id;
     const user = await User.findById(_id).select("+refreshToken");
 
     if (incomingRefreshToken !== user.refreshToken) {
-      throw new ApiError(
-        400,
-        "User's Refresh Token and incoming Refresh Token didn't matched, so we can't refresh new access token!!"
-      );
+      throw new ApiError(400, "Invalid or mismatched Refresh Token");
     }
 
-    const { newAccessToken, newRefreshToken } =
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
       await generateAccessTokenAndRefreshToken(_id);
 
     const options = {
       httpOnly: true,
       secure: true,
     };
+
     return res
       .status(200)
       .cookie("accessToken", newAccessToken, options)
       .cookie("refreshToken", newRefreshToken, options)
       .json(
-        new ApiResponse(
-          200,
-          "Access Token Refreshed after expiry along with Refresh Token",
-          { newAccessToken, newRefreshToken }
-        )
+        new ApiResponse(200, "Access Token Refreshed", {
+          newAccessToken,
+          newRefreshToken,
+        })
       );
   } catch (error) {
     throw new ApiError(401, error?.message || "Invalid refresh token");
   }
 });
 
+/**
+ * @desc Change user password after validating old one
+ * @route POST /api/users/change-current-password
+ * @access Protected
+ */
 const changeCurrentPassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
@@ -236,12 +265,12 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Both old and new passwords are required");
   }
 
-  const user = await User.findById(req.user?._id).select("+password"); // optional
+  const user = await User.findById(req.user?._id).select("+password");
 
   const passwordValid = await user.comparePassword(oldPassword);
 
   if (!passwordValid) {
-    throw new ApiError(400, "Old password didn't matched");
+    throw new ApiError(400, "Old password didn't match");
   }
 
   user.password = newPassword;
@@ -252,13 +281,18 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Password changed successfully"));
 });
 
+/**
+ * @desc Get currently logged in user
+ * @route GET /api/users/get-current-user
+ * @access Protected
+ */
 const getCurrentUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user?._id).select(
     "-password -refreshToken -isActive"
   );
 
   if (!user) {
-    throw new ApiError(400, "Couldn't able to find the current user");
+    throw new ApiError(400, "Couldn't find the current user");
   }
 
   return res.status(200).json(
@@ -268,8 +302,14 @@ const getCurrentUser = asyncHandler(async (req, res) => {
   );
 });
 
+/**
+ * @desc Update basic profile details
+ * @route POST /api/users/update-account-details
+ * @access Protected
+ */
 const updateAccountDetails = asyncHandler(async (req, res) => {
   const { firstName, lastName, username } = req.body;
+
   if (!firstName && !lastName && !username) {
     return res.status(400).json(new ApiResponse(400, "No fields to update"));
   }
@@ -278,9 +318,9 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     req.user?._id,
     {
       $set: {
-        ...(req.body.firstName && { firstName: req.body.firstName }),
-        ...(req.body.lastName && { firstName: req.body.lastName }),
-        ...(req.body.username && { firstName: req.body.username }),
+        ...(firstName && { firstName }),
+        ...(lastName && { lastName }),
+        ...(username && { username }),
       },
     },
     { new: true }
@@ -297,82 +337,87 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * @desc Update user email
+ * @route POST /api/users/update-email
+ * @access Protected
+ */
 const updateEmail = asyncHandler(async (req, res) => {
-  const { email } = req.body?.email;
+  const { email } = req.body;
+
   if (!email) {
     throw new ApiError(400, "Email is required");
   }
 
-  const userwithUpdatedEmail = await User.findByIdAndUpdate(
+  const updatedUser = await User.findByIdAndUpdate(
     req.user?._id,
-    {
-      $set: {
-        email,
-      },
-    },
+    { $set: { email } },
     { new: true }
   );
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, "Email Updated Successfully", userwithUpdatedEmail)
-    );
+    .json(new ApiResponse(200, "Email Updated Successfully", updatedUser));
 });
 
-//Before executing this line in route handler we will use first authMiddleware and then multer Middleware
+/**
+ * @desc Update user profile picture
+ * @route POST /api/users/upload-profile-pic
+ * @access Protected
+ */
 const updateProfilePicture = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user?._id).select(
     "-password -refreshToken -isActive"
   );
 
   if (!user) {
-    throw new ApiError(400, "We aren't able to fetch the User");
+    throw new ApiError(400, "Unable to fetch user");
   }
 
-  const deafultProfilePicture =
+  const defaultProfilePicture =
     "https://example.com/default-profile-picture.png";
 
-  let response;
-  if (user.profilePicture !== deafultProfilePicture) {
-    response = await deleteOnCloudinary(user.cloudinaryPublicId);
+  // Delete old picture from cloudinary if not default
+  if (user.profilePicture !== defaultProfilePicture) {
+    await deleteOnCloudinary(user.cloudinaryPublicId);
   }
 
-  const localPathOfFileUploadedThroughMulter = req.file?.path;
+  const localPath = req.file?.path;
 
-  if (!localPathOfFileUploadedThroughMulter) {
+  if (!localPath) {
     throw new ApiError(400, "No Profile Image found in request");
   }
 
-  const cloudinaryObjectAfterUploading = await uploadOnCloudinary(
-    localPathOfFileUploadedThroughMulter
-  );
+  const uploadResult = await uploadOnCloudinary(localPath);
 
-  if (!cloudinaryObjectAfterUploading.url) {
-    throw new ApiError(500, "Something went wrong");
+  if (!uploadResult.url) {
+    throw new ApiError(500, "Error while uploading new image");
   }
 
-  const cloudinaryURL = cloudinaryObjectAfterUploading?.url;
-  const cloudinaryPublicId = cloudinaryObjectAfterUploading?.public_id;
-
-  const updatedUserProfileObject = await User.findByIdAndUpdate(
+  await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
-        profilePicture: cloudinaryURL,
-        cloudinaryPublicId: cloudinaryPublicId,
+        profilePicture: uploadResult.url,
+        cloudinaryPublicId: uploadResult.public_id,
       },
     },
     { new: true }
-  ).select("-password -refreshToken, -isActive");
+  );
 
   return res
     .status(200)
     .json(new ApiResponse(200, "Profile Picture updated successfully"));
 });
 
+/**
+ * @desc Get followers and followings of a user
+ * @route POST /api/users/get-user-public-info
+ * @access Protected
+ */
 const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
   const { username } = req.params;
+
   if (!username?.trim()) {
     throw new ApiError(400, "Username is missing");
   }
@@ -380,7 +425,7 @@ const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
   const accountPublicData = await User.aggregate([
     {
       $match: {
-        username: username?.tolowerCase(),
+        username: username?.toLowerCase(),
       },
     },
     {
@@ -401,8 +446,8 @@ const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
     },
     {
       $addFields: {
-        followersCount: { $size: $followers },
-        followingsCount: { $size: $followings },
+        followersCount: { $size: "$followers" },
+        followingsCount: { $size: "$followings" },
         isFollowing: {
           $cond: {
             if: { $in: [req.user?._id, "$followers.follower"] },
@@ -426,7 +471,7 @@ const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
   ]);
 
   if (!accountPublicData?.length) {
-    throw new ApiError(404, "User Details doesn't exists");
+    throw new ApiError(404, "User Details doesn't exist");
   }
 
   return res
@@ -435,6 +480,8 @@ const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
       new ApiResponse(200, "Visited User Details fetched", accountPublicData[0])
     );
 });
+
+// Export all controller functions
 export {
   registerUser,
   loginUser,
@@ -445,5 +492,5 @@ export {
   updateAccountDetails,
   updateEmail,
   updateProfilePicture,
-  accountPublicData,
+  getUserFollowersAndFollowings,
 };
