@@ -47,6 +47,9 @@ const userSchema = new Schema(
     cloudinaryPublicId: {
       type: String,
     },
+    coverImage: {
+      type: String,
+    },
     isActive: {
       type: Boolean,
       default: true, // Can be used for soft deletes or deactivation

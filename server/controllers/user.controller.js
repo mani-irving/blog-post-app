@@ -371,6 +371,70 @@ const updateProfilePicture = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Profile Picture updated successfully"));
 });
 
+const getUserFollowersAndFollowings = asyncHandler(async (req, res) => {
+  const { username } = req.params;
+  if (!username?.trim()) {
+    throw new ApiError(400, "Username is missing");
+  }
+
+  const accountPublicData = await User.aggregate([
+    {
+      $match: {
+        username: username?.tolowerCase(),
+      },
+    },
+    {
+      $lookup: {
+        from: "followerAndFollowings",
+        localField: "_id",
+        foreignField: "following",
+        as: "followers",
+      },
+    },
+    {
+      $lookup: {
+        from: "followerAndFollowings",
+        localField: "_id",
+        foreignField: "follower",
+        as: "followings",
+      },
+    },
+    {
+      $addFields: {
+        followersCount: { $size: $followers },
+        followingsCount: { $size: $followings },
+        isFollowing: {
+          $cond: {
+            if: { $in: [req.user?._id, "$followers.follower"] },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        firstName: 1,
+        username: 1,
+        followers: 1,
+        followings: 1,
+        isFollowing: 1,
+        profilePicture: 1,
+        coverImage: 1,
+      },
+    },
+  ]);
+
+  if (!accountPublicData?.length) {
+    throw new ApiError(404, "User Details doesn't exists");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Visited User Details fetched", accountPublicData[0])
+    );
+});
 export {
   registerUser,
   loginUser,
@@ -381,4 +445,5 @@ export {
   updateAccountDetails,
   updateEmail,
   updateProfilePicture,
+  accountPublicData,
 };
