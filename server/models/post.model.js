@@ -71,11 +71,10 @@ const postSchema = new Schema(
     ],
 
     // Flag to control whether post is publicly visible or not
-    //Feature to be placed in further future
-    // isPublished: {
-    //   type: Boolean,
-    //   default: false,
-    // },
+    isPublic: {
+      type: Boolean,
+      default: false,
+    },
 
     // Timestamp of when the post was published
     //To be done through Time Stamps

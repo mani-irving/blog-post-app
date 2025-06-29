@@ -61,6 +61,7 @@ const createPost = asyncHandler(async (req, res) => {
     featuredImagePath:
       featuredImageUploadedOnCloudinaryObject?.public_id || undefined,
     author: user._id,
+    isPublic: true,
   });
 
   // Step 6: Send successful response with the created post
@@ -118,4 +119,117 @@ const deletePost = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Post deleted successfully"));
 });
 
-export { createPost, deletePost };
+/**
+ * @desc    Edit a post by ID (only author can edit)
+ * @route   PUT /api/posts/:postId
+ * @access  Protected
+ */
+const editPost = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+
+  // Validate authenticated user
+  if (!userId) {
+    throw new ApiError(401, "Unauthorized access");
+  }
+
+  const { postId } = req.params;
+
+  // Validate postId
+  if (!postId) {
+    throw new ApiError(400, "Post ID is required");
+  }
+
+  // Fetch post
+  const post = await Post.findById(postId);
+  if (!post) {
+    throw new ApiError(404, "Post not found");
+  }
+
+  // Authorization: Only author can edit their post
+  if (post.author.toString() !== userId.toString()) {
+    throw new ApiError(403, "You are not authorized to edit this post");
+  }
+
+  const { content, category } = req.body;
+
+  // Validate content
+  if (!content?.trim()) {
+    throw new ApiError(400, "Post content is required");
+  }
+
+  // Validate category (optional)
+  let categoryExists = null;
+  if (category?.trim()) {
+    categoryExists = await Category.findById(category);
+    if (!categoryExists) {
+      throw new ApiError(400, "Invalid category");
+    }
+  }
+
+  // Update post
+  const updatedPost = await Post.findByIdAndUpdate(
+    postId,
+    {
+      $set: {
+        content,
+        ...(categoryExists && { category: categoryExists._id }),
+      },
+    },
+    { new: true }
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Post edited successfully", updatedPost));
+});
+
+/**
+ * @desc    Toggle post visibility (public/private)
+ * @route   PATCH /api/posts/toggle/:postId
+ * @access  Protected (Author only)
+ */
+const togglePostVisibility = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+
+  // Validate authenticated user
+  if (!userId) {
+    throw new ApiError(401, "Unauthorized access");
+  }
+
+  const { postId } = req.params;
+
+  // Validate post ID
+  if (!postId) {
+    throw new ApiError(400, "Post ID is required");
+  }
+
+  // Fetch the post
+  const post = await Post.findById(postId);
+  if (!post) {
+    throw new ApiError(404, "Post not found");
+  }
+
+  // Authorization: Only author can toggle visibility
+  if (post.author.toString() !== userId.toString()) {
+    throw new ApiError(403, "You are not authorized to modify this post");
+  }
+
+  // Toggle visibility
+  const updatedPost = await Post.findByIdAndUpdate(
+    post._id,
+    { $set: { isPublic: !post.isPublic } },
+    { new: true }
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        `Post is now ${updatedPost.isPublic ? "Public" : "Private"}`,
+        updatedPost
+      )
+    );
+});
+
+export { createPost, deletePost, editPost, togglePostVisibility };
